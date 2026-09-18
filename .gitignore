@@ -1,0 +1,4 @@
+.build/
+DepotBar.app/
+.DS_Store
+*.zip

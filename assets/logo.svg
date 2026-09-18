@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262d40"/>
+      <stop offset="1" stop-color="#10141f"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#e85d1f"/>
+    </linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc25e"/>
+      <stop offset="1" stop-color="#ff9a2e"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ddc84"/>
+      <stop offset="1" stop-color="#0ca678"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+
+  <!-- macOS-style rounded background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
+
+  <g transform="translate(496 482) scale(1.05) translate(-512 -482)">
+  <!-- ground shadow -->
+  <ellipse cx="470" cy="830" rx="300" ry="52" fill="#000000" opacity="0.55" filter="url(#soft)"/>
+
+  <!-- crate: top face -->
+  <polygon points="252,470 372,350 892,350 772,470" fill="url(#top)"/>
+  <!-- crate: tape on top -->
+  <polygon points="512,350 592,350 472,470 392,470" fill="#7a2d0e" opacity="0.55"/>
+  <!-- crate: front face -->
+  <rect x="252" y="470" width="520" height="330" fill="url(#face)"/>
+  <!-- crate: tape on front -->
+  <rect x="452" y="470" width="80" height="330" fill="#7a2d0e" opacity="0.45"/>
+  <!-- crate: edge light -->
+  <rect x="252" y="470" width="520" height="10" fill="#ffffff" opacity="0.25"/>
+  <!-- crate: stencil lines -->
+  <rect x="292" y="640" width="120" height="18" rx="9" fill="#7a2d0e" opacity="0.5"/>
+  <rect x="292" y="672" width="88" height="18" rx="9" fill="#7a2d0e" opacity="0.5"/>
+
+  <!-- CI status badge -->
+  <circle cx="762" cy="742" r="148" fill="#10141f"/>
+  <circle cx="762" cy="742" r="128" fill="url(#badge)"/>
+  <path d="M700 744 l44 44 l80 -96" fill="none" stroke="#ffffff" stroke-width="44"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
