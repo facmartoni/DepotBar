@@ -43,7 +43,7 @@ Click any workflow to open it on depot.dev. The menu bar icon itself tells the s
 
 | Icon | Meaning |
 | ---- | ------- |
-| animated spinner | fetching, or a workflow is still running |
+| animated spinner | a workflow is still running (or a refresh is taking >2s) |
 | ✓ green check | everything finished clean |
 | ✗ red cross | something failed |
 | ⚠ triangle | couldn't reach Depot (see logs) |

@@ -74,8 +74,36 @@ enum SelfTest {
         print("  spinner frames over 10 ticks: \(distinctFrames) distinct (\(frames.joined()))")
         print("  running-row titles over 10 ticks: \(distinctTitles) distinct")
 
+        // Menu bar icon must not flash on routine refreshes (the noise bug).
+        let now = Date()
+        let finished = DepotWorkflow(
+            workflow_id: "done", name: "CI", workflow_path: "ci.yml", repo: "o/r",
+            status: "finished", trigger: "push", run_id: "r", sha: "abc1234",
+            head_sha: "abc1234", created_at: "2026-09-18T20:00:00Z",
+            job_counts: JobCounts(total: 2, queued: 0, waiting: 0, running: 0, finished: 2, failed: 0, cancelled: 0, skipped: 0)
+        )
+        func isSpinner(_ icon: MenuPresentation.StatusIcon) -> Bool {
+            if case .spinner = icon { return true }
+            return false
+        }
+        let quickRefresh = MenuPresentation.statusIcon(
+            workflows: [finished], isFetching: true,
+            fetchStartedAt: now.addingTimeInterval(-0.5),
+            lastError: nil, spinnerIndex: 0, now: now)
+        let slowRefresh = MenuPresentation.statusIcon(
+            workflows: [finished], isFetching: true,
+            fetchStartedAt: now.addingTimeInterval(-3),
+            lastError: nil, spinnerIndex: 0, now: now)
+        let runningIdle = MenuPresentation.statusIcon(
+            workflows: [sample], isFetching: false, fetchStartedAt: nil,
+            lastError: nil, spinnerIndex: 0, now: now)
+        print("  icon during 0.5s refresh (settled): \(quickRefresh) — expect symbol, no flash")
+        print("  icon during 3s refresh (settled):   \(slowRefresh) — expect spinner")
+        print("  icon with running workflow, idle:   \(runningIdle) — expect spinner")
+        let noFlash = !isSpinner(quickRefresh) && isSpinner(slowRefresh) && isSpinner(runningIdle)
+
         let pass = fixed.trackingFires >= 5 && plain.trackingFires == 0
-            && distinctFrames == 10 && distinctTitles == 10
+            && distinctFrames == 10 && distinctTitles == 10 && noFlash
         print(pass
             ? "SELF-TEST PASS: spinner keeps animating while the menu is open"
             : "SELF-TEST FAIL")

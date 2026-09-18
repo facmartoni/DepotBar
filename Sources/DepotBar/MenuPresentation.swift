@@ -47,8 +47,25 @@ enum MenuPresentation {
         }
     }
 
-    static func statusIcon(workflows: [DepotWorkflow], isFetching: Bool, lastError: String?, spinnerIndex: Int) -> StatusIcon {
-        if isFetching || workflows.contains(where: { $0.isRunning }) {
+    /// Grace period before a refresh shows the spinner. Routine fetches take
+    /// ~1s, so without this the icon would flash every 30s refresh (noise).
+    /// Only genuinely slow/stuck fetches — or actually-running workflows —
+    /// spin the menu bar icon.
+    static let slowFetchThreshold: TimeInterval = 2.0
+
+    static func statusIcon(
+        workflows: [DepotWorkflow], isFetching: Bool, fetchStartedAt: Date?,
+        lastError: String?, spinnerIndex: Int, now: Date = Date()
+    ) -> StatusIcon {
+        let slowFetch: Bool
+        if !isFetching {
+            slowFetch = false
+        } else if let started = fetchStartedAt {
+            slowFetch = now.timeIntervalSince(started) > slowFetchThreshold
+        } else {
+            slowFetch = true
+        }
+        if slowFetch || workflows.contains(where: { $0.isRunning }) {
             return .spinner(frame: spinner(at: spinnerIndex))
         } else if workflows.contains(where: { $0.isFailed }) {
             return .symbol(name: "xmark.circle.fill")
@@ -80,7 +97,7 @@ enum MenuDump {
         do {
             let client = try DepotClient(count: 5)
             let workflows = try await client.fetchWorkflows()
-            print("menu-bar icon: \(MenuPresentation.statusIcon(workflows: workflows, isFetching: false, lastError: nil, spinnerIndex: 0))")
+            print("menu-bar icon: \(MenuPresentation.statusIcon(workflows: workflows, isFetching: false, fetchStartedAt: nil, lastError: nil, spinnerIndex: 0))")
             print("---")
             print("Depot CI")
             print("---")

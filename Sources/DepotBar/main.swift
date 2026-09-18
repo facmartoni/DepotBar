@@ -31,6 +31,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastFetch: Date?
     private var lastError: String?
     private var isFetching = false
+    private var fetchStartedAt: Date?
     private var spinnerIndex = 0
     private var rowItems: [String: NSMenuItem] = [:]
     private var statusFooterItem: NSMenuItem?
@@ -94,6 +95,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func refresh() {
         guard let client, !isFetching else { return }
         isFetching = true
+        fetchStartedAt = Date()
         updateStatusIcon()
         fetchTask = Task {
             do {
@@ -209,7 +211,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusIcon() {
         guard let button = statusItem?.button else { return }
         switch MenuPresentation.statusIcon(
-            workflows: workflows, isFetching: isFetching,
+            workflows: workflows, isFetching: isFetching, fetchStartedAt: fetchStartedAt,
             lastError: lastError, spinnerIndex: spinnerIndex
         ) {
         case .spinner(let frame):
