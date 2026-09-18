@@ -25,11 +25,11 @@ Click the menu bar icon, get the state of CI:
 ```
 Depot CI
 ------------------------------
-✓  Tests & Deploy — macch-core · 15m ago · 10/10 jobs
-✓  React Doctor — macch-core · 15m ago · 1/1 jobs
-⠋  Test Docker Build — macch-hub · 1m ago · 1/3 jobs
-✓  Run MFA Tests — macch-hub · 3m ago · skipped
-✗  Nightly E2E — macch-hub · 2h ago · 1 failed
+✓  Tests & Deploy — macch-core · 15m ago · 8m16s
+✓  React Doctor — macch-core · #317 · 15m ago · 31s
+⠋  Test Docker Build — macch-hub · #42 · 1m ago · 1m10s
+✓  Run MFA Tests — macch-hub · 3m ago · 4m02s
+✗  Nightly E2E — macch-hub · 2h ago · 22m45s
 ------------------------------
 Updated just now
 Refresh now                  ⌘R
@@ -50,7 +50,7 @@ Click any workflow to open it on depot.dev. The menu bar icon itself tells the s
 
 ## Features
 
-- 📊 **Latest 5 workflows** with status, repo, age, and job summary
+- 📊 **Latest 5 workflows** with status, repo, PR number, age, and duration
 - 🌀 **Live spinner** in the menu bar and on running rows
 - 🔗 **One click** to open any workflow (or the whole dashboard) in your browser
 - 🔄 **Auto-refresh** every 30 seconds, plus every time you open the menu

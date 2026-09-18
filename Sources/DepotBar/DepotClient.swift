@@ -25,6 +25,10 @@ struct DepotWorkflow: Codable, Sendable, Identifiable {
     var head_sha: String
     var created_at: String
     var job_counts: JobCounts
+    // Enriched post-list via `depot ci workflow show` (nil when detail is unavailable).
+    var ref: String? = nil
+    var started_at: String? = nil
+    var finished_at: String? = nil
 
     var id: String { workflow_id }
 
@@ -57,18 +61,59 @@ struct DepotWorkflow: Codable, Sendable, Identifiable {
         }
     }
 
-    var jobsSummary: String {
-        let jc = job_counts
-        if isRunning {
-            let done = jc.finished + jc.failed + jc.skipped
-            return "\(done)/\(jc.total) jobs"
-        }
-        if jc.failed > 0 { return "\(jc.failed) failed" }
-        if jc.cancelled > 0 { return "\(jc.cancelled) cancelled" }
-        if jc.finished == 0 && jc.skipped > 0 { return "skipped" }
-        if jc.skipped > 0 { return "\(jc.finished) passed · \(jc.skipped) skipped" }
-        return "\(jc.finished)/\(jc.total) jobs"
+    /// PR number parsed from refs like `refs/pull/317/merge` (nil for push triggers).
+    var prNumber: Int? {
+        guard let ref else { return nil }
+        let parts = ref.split(separator: "/")
+        guard parts.count >= 3, parts[0] == "refs", parts[1] == "pull",
+              let number = Int(parts[2])
+        else { return nil }
+        return number
     }
+
+    var startedAt: Date? {
+        started_at.flatMap { ISO8601DateFormatter().date(from: $0) }
+    }
+
+    var finishedAt: Date? {
+        finished_at.flatMap { ISO8601DateFormatter().date(from: $0) }
+    }
+
+    /// Seconds from workflow start to finish (or to now while still running).
+    func elapsedSeconds(now: Date = Date()) -> Int? {
+        guard let start = startedAt else { return nil }
+        let end = finishedAt ?? now
+        return max(0, Int(end.timeIntervalSince(start)))
+    }
+
+    /// Bare duration ("8m22s") — the row icon already says running vs finished.
+    func durationText(now: Date = Date()) -> String? {
+        guard let seconds = elapsedSeconds(now: now) else { return nil }
+        return Self.formatDuration(seconds)
+    }
+
+    static func formatDuration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 {
+            return String(format: "%dm%02ds", seconds / 60, seconds % 60)
+        }
+        return String(format: "%dh%02dm", seconds / 3600, (seconds % 3600) / 60)
+    }
+
+}
+
+// MARK: - Detail models (mirror `depot ci workflow show -o json`, subset we need)
+
+struct WorkflowShowOutput: Codable, Sendable {
+    struct RunInfo: Codable, Sendable {
+        var ref: String?
+    }
+    struct WorkflowInfo: Codable, Sendable {
+        var started_at: String?
+        var finished_at: String?
+    }
+    var run: RunInfo?
+    var workflow: WorkflowInfo?
 }
 
 // MARK: - Client (shells out to the Depot CLI, reusing its auth)
@@ -131,11 +176,36 @@ struct DepotClient: Sendable {
 
     func fetchWorkflows() async throws -> [DepotWorkflow] {
         let data = try await run(arguments: ["ci", "workflow", "list", "-n", "\(count)", "-o", "json"])
+        let listed: [DepotWorkflow]
         do {
-            return try JSONDecoder().decode([DepotWorkflow].self, from: data)
+            listed = try JSONDecoder().decode([DepotWorkflow].self, from: data)
         } catch {
             throw DepotError.decodeError(error.localizedDescription)
         }
+        // Enrich each workflow with timing + PR ref via `show`, concurrently.
+        // A detail failure for one workflow must not fail the whole refresh.
+        return await withTaskGroup(of: (Int, WorkflowShowOutput?).self) { group in
+            for (index, workflow) in listed.enumerated() {
+                group.addTask {
+                    let detail = try? await self.fetchDetail(for: workflow.workflow_id)
+                    return (index, detail)
+                }
+            }
+            var enriched = listed
+            for await (index, detail) in group {
+                if let detail {
+                    enriched[index].ref = detail.run?.ref
+                    enriched[index].started_at = detail.workflow?.started_at
+                    enriched[index].finished_at = detail.workflow?.finished_at
+                }
+            }
+            return enriched
+        }
+    }
+
+    func fetchDetail(for workflowID: String) async throws -> WorkflowShowOutput {
+        let data = try await run(arguments: ["ci", "workflow", "show", workflowID, "-o", "json"])
+        return try JSONDecoder().decode(WorkflowShowOutput.self, from: data)
     }
 
     func dashboardURL() -> URL? {

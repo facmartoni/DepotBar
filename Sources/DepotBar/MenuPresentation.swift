@@ -18,7 +18,15 @@ enum MenuPresentation {
         } else {
             icon = "✓"
         }
-        return "\(icon)  \(workflow.name) — \(workflow.shortRepo) · \(workflow.relativeTime(now: now)) · \(workflow.jobsSummary)"
+        var parts = ["\(workflow.name) — \(workflow.shortRepo)"]
+        if let pr = workflow.prNumber {
+            parts.append("#\(pr)")
+        }
+        parts.append(workflow.relativeTime(now: now))
+        if let duration = workflow.durationText(now: now) {
+            parts.append(duration)
+        }
+        return "\(icon)  " + parts.joined(separator: " · ")
     }
 
     static func footerTitle(isFetching: Bool, lastFetch: Date?, lastError: String?, spinnerIndex: Int, now: Date = Date()) -> String {
