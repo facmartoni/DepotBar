@@ -94,6 +94,7 @@ links is read from the CLI's own settings (`DEPOT_ORG_ID` overrides it).
 | Org for links | `DEPOT_ORG_ID` env var, else the CLI's current org |
 | Logs | `/tmp/depotbar.log` |
 | Debug the menu without UI | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --dump-menu` |
+| Verify menu-open timers | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --self-test` |
 | Refresh interval / row count | constants in [`main.swift`](Sources/DepotBar/main.swift) / [`DepotClient.swift`](Sources/DepotBar/DepotClient.swift) — edit & rebuild |
 
 ## Project layout

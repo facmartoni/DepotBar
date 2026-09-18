@@ -8,6 +8,10 @@ if CommandLine.arguments.contains("--dump-menu") {
     MenuDump.runAndExit()
 }
 
+if CommandLine.arguments.contains("--self-test") {
+    SelfTest.runAndExit()
+}
+
 let app = NSApplication.shared
 let delegate = DepotBarApp()
 app.delegate = delegate
@@ -59,11 +63,11 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
         refresh()
 
-        Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
+        AppTimers.scheduled(interval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         // Spinner animation tick (menu bar icon + running rows).
-        Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+        AppTimers.scheduled(interval: 0.12, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tickSpinner() }
         }
         log("DepotBar alive")
