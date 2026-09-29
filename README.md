@@ -82,6 +82,12 @@ and the Depot CLI installed:
 brew install depot/tap/depot
 ```
 
+Without Homebrew, use the installer script instead (pick a dir on your PATH):
+
+```sh
+curl -fsSL https://depot.dev/install-cli.sh | DEPOT_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
 ## How auth works
 
 DepotBar shells out to `depot ci workflow list -n 5 -o json`. Auth resolves

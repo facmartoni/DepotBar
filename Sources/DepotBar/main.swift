@@ -95,6 +95,20 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fetchTask: Task<Void, Never>?
 
     func refresh() {
+        // (Re)create the client lazily so installing the CLI — or saving a
+        // token — while the app is already running recovers on next refresh.
+        if client == nil {
+            do {
+                client = try DepotClient(count: 5)
+                lastError = nil
+                log("Depot CLI ready: \(client!.cliPath) org=\(client!.orgID ?? "unknown") auth=\(client!.authSource)")
+            } catch {
+                lastError = "Depot CLI not found. Install it: brew install depot/tap/depot"
+                log("ERROR: depot CLI not found")
+                rebuildMenu()
+                return
+            }
+        }
         guard let client, !isFetching else { return }
         isFetching = true
         fetchStartedAt = Date()
