@@ -128,12 +128,28 @@ struct DepotClient: Sendable {
     let cliPath: String
     let orgID: String?
     let count: Int
+    /// Resolved API token (`DEPOT_TOKEN` env wins, else the Keychain token).
+    /// Exported to the `depot` child process; nil means "use `depot login`".
+    let apiToken: String?
+    private let baseEnvironment: [String: String]
 
-    init(count: Int = 5) throws {
+    init(
+        count: Int = 5,
+        storage: TokenStorage = KeychainTokenStorage(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws {
         self.cliPath = try Self.resolveCLIPath()
         self.orgID = Self.resolveOrgID()
         self.count = count
+        self.baseEnvironment = environment
+        self.apiToken = TokenAuth.resolve(
+            keychainToken: try? storage.load(),
+            environment: environment
+        )
     }
+
+    /// Where auth comes from — shown in the menu/logs, never the token itself.
+    var authSource: String { apiToken == nil ? "Depot CLI login" : "API token" }
 
     /// Locate the `depot` binary (Homebrew + standard paths + PATH lookup).
     static func resolveCLIPath() throws -> String {
@@ -223,10 +239,12 @@ struct DepotClient: Sendable {
     private func run(arguments: [String]) async throws -> Data {
         let cliPath = self.cliPath
         return try await withCheckedThrowingContinuation { continuation in
+            let childEnvironment = TokenAuth.childEnvironment(base: self.baseEnvironment, token: self.apiToken)
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: cliPath)
                 process.arguments = arguments
+                process.environment = childEnvironment
                 let outPipe = Pipe()
                 let errPipe = Pipe()
                 process.standardOutput = outPipe
