@@ -19,6 +19,9 @@ enum MenuPresentation {
             icon = "✓"
         }
         var parts = ["\(workflow.name) — \(workflow.shortRepo)"]
+        if let author = workflow.author, !author.isEmpty {
+            parts.append(author)
+        }
         if let pr = workflow.prNumber {
             parts.append("#\(pr)")
         }

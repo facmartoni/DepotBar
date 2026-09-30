@@ -29,6 +29,9 @@ struct DepotWorkflow: Codable, Sendable, Identifiable {
     var ref: String? = nil
     var started_at: String? = nil
     var finished_at: String? = nil
+    // Enriched post-list via the GitHub API (nil when `gh` is missing or the lookup fails).
+    // Display-ready: "@login" when the GitHub user is known, else the raw commit author name.
+    var author: String? = nil
 
     var id: String { workflow_id }
 
@@ -116,6 +119,84 @@ struct WorkflowShowOutput: Codable, Sendable {
     var workflow: WorkflowInfo?
 }
 
+// MARK: - Author models (mirror `gh api repos/{owner}/{repo}/commits/{sha} --jq ...`, subset we need)
+
+/// Tiny projection of a GitHub commit: `{"login": .author.login, "name": .commit.author.name}`.
+struct GitHubAuthorOutput: Codable, Sendable {
+    var login: String?
+    var name: String?
+}
+
+enum GitHubAuthor {
+    /// "@login" when the GitHub user is linked, else the raw commit author name, else nil.
+    static func displayName(from output: GitHubAuthorOutput) -> String? {
+        if let login = output.login, !login.isEmpty {
+            return "@\(login)"
+        }
+        if let name = output.name, !name.isEmpty {
+            return name
+        }
+        return nil
+    }
+}
+
+/// In-memory cache of resolved authors, keyed by `"repo@sha"`. Commits are
+/// immutable, so entries never expire for the life of the process.
+actor AuthorCache {
+    private var stored: [String: String?] = [:]
+
+    func lookup(_ key: String) -> (hit: Bool, author: String?) {
+        guard let author = stored[key] else { return (false, nil) }
+        return (true, author)
+    }
+
+    func store(_ author: String?, for key: String) {
+        stored[key] = author
+    }
+}
+
+// MARK: - GitHub client (shells out to the `gh` CLI, reusing its auth)
+
+struct GitHubClient: Sendable {
+    let cliPath: String
+
+    init() throws {
+        self.cliPath = try Self.resolveCLIPath()
+    }
+
+    /// Locate the `gh` binary (Homebrew + standard paths + PATH lookup).
+    static func resolveCLIPath() throws -> String {
+        let candidates = [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "\(NSHomeDirectory())/.local/bin/gh",
+        ]
+        let fm = FileManager.default
+        for path in candidates where fm.isExecutableFile(atPath: path) {
+            return path
+        }
+        // Fall back to a login-shell PATH lookup.
+        if let found = try? DepotClient.shellOut("/bin/zsh", ["-l", "-c", "command -v gh"])
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !found.isEmpty, fm.isExecutableFile(atPath: found)
+        {
+            return found
+        }
+        throw DepotError.cliNotFound
+    }
+
+    /// Commit author for `repo` at `sha`, display-ready (`@login` or plain name).
+    /// Returns nil when GitHub knows no author (or the repo/SHA is unknown).
+    func fetchAuthorDisplayName(repo: String, sha: String) async throws -> String? {
+        let data = try await DepotClient.runBinary(
+            executable: cliPath,
+            arguments: ["api", "repos/\(repo)/commits/\(sha)", "--jq", "{login: .author.login, name: .commit.author.name}"]
+        )
+        let output = try JSONDecoder().decode(GitHubAuthorOutput.self, from: data)
+        return GitHubAuthor.displayName(from: output)
+    }
+}
+
 // MARK: - Client (shells out to the Depot CLI, reusing its auth)
 
 enum DepotError: Error, Sendable {
@@ -128,6 +209,7 @@ struct DepotClient: Sendable {
     let cliPath: String
     let orgID: String?
     let count: Int
+    private let authorCache = AuthorCache()
 
     init(count: Int = 5) throws {
         self.cliPath = try Self.resolveCLIPath()
@@ -199,8 +281,48 @@ struct DepotClient: Sendable {
                     enriched[index].finished_at = detail.workflow?.finished_at
                 }
             }
-            return enriched
+            return await self.enrichAuthors(enriched)
         }
+    }
+
+    /// Fill `author` for each workflow from its GitHub commit. Best-effort:
+    /// a missing `gh` CLI or a failed lookup leaves the author nil and never
+    /// fails the refresh. Resolved authors are cached by `repo@sha`.
+    func enrichAuthors(_ workflows: [DepotWorkflow]) async -> [DepotWorkflow] {
+        guard let github = try? GitHubClient() else { return workflows }
+        let cache = authorCache
+        let authorsByKey = await withTaskGroup(of: (String, String?).self) { group in
+            var seen = Set<String>()
+            for workflow in workflows {
+                let sha = workflow.head_sha.isEmpty ? workflow.sha : workflow.head_sha
+                guard !workflow.repo.isEmpty, !sha.isEmpty else { continue }
+                let key = "\(workflow.repo)@\(sha)"
+                guard seen.insert(key).inserted else { continue }
+                group.addTask {
+                    let cached = await cache.lookup(key)
+                    if cached.hit {
+                        return (key, cached.author)
+                    }
+                    let author = try? await github.fetchAuthorDisplayName(repo: workflow.repo, sha: sha)
+                    await cache.store(author, for: key)
+                    return (key, author)
+                }
+            }
+            var collected: [String: String?] = [:]
+            for await (key, author) in group {
+                collected[key] = author
+            }
+            return collected
+        }
+        var enriched = workflows
+        for index in enriched.indices {
+            let workflow = enriched[index]
+            let sha = workflow.head_sha.isEmpty ? workflow.sha : workflow.head_sha
+            if let author = authorsByKey["\(workflow.repo)@\(sha)"] {
+                enriched[index].author = author
+            }
+        }
+        return enriched
     }
 
     func fetchDetail(for workflowID: String) async throws -> WorkflowShowOutput {
@@ -221,11 +343,14 @@ struct DepotClient: Sendable {
     // MARK: - Process plumbing
 
     private func run(arguments: [String]) async throws -> Data {
-        let cliPath = self.cliPath
-        return try await withCheckedThrowingContinuation { continuation in
+        try await Self.runBinary(executable: cliPath, arguments: arguments)
+    }
+
+    static func runBinary(executable: String, arguments: [String]) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
-                process.executableURL = URL(fileURLWithPath: cliPath)
+                process.executableURL = URL(fileURLWithPath: executable)
                 process.arguments = arguments
                 let outPipe = Pipe()
                 let errPipe = Pipe()
@@ -251,7 +376,7 @@ struct DepotClient: Sendable {
         }
     }
 
-    private static func shellOut(_ launchPath: String, _ arguments: [String]) throws -> String {
+    static func shellOut(_ launchPath: String, _ arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
