@@ -33,6 +33,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isFetching = false
     private var fetchStartedAt: Date?
     private var spinnerIndex = 0
+    private var theme: Theme = .system
     private var rowItems: [String: NSMenuItem] = [:]
     private var statusFooterItem: NSMenuItem?
     private var logHandle: FileHandle?
@@ -47,6 +48,10 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         menu.delegate = self
         menu.autoenablesItems = false
+
+        theme = AppConfig.load().theme
+        menu.appearance = theme.menuAppearance
+        log("theme: \(theme.rawValue)")
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Depot CI")
@@ -82,10 +87,22 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Menu delegate
 
     func menuWillOpen(_ menu: NSMenu) {
+        reloadTheme()
         updateRowTitles()
         updateFooter()
         // Refresh in the background every time the menu opens.
         refresh()
+    }
+
+    /// Re-read the config so a theme change applies the next time the menu
+    /// opens — no relaunch needed.
+    private func reloadTheme() {
+        let fresh = AppConfig.load().theme
+        guard fresh != theme else { return }
+        theme = fresh
+        menu.appearance = theme.menuAppearance
+        log("theme: \(theme.rawValue)")
+        updateStatusIcon()
     }
 
     // MARK: - Fetching
@@ -210,10 +227,16 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateStatusIcon() {
         guard let button = statusItem?.button else { return }
-        switch MenuPresentation.statusIcon(
+        let status = MenuPresentation.statusIcon(
             workflows: workflows, isFetching: isFetching, fetchStartedAt: fetchStartedAt,
             lastError: lastError, spinnerIndex: spinnerIndex
-        ) {
+        )
+        if theme == .glass {
+            button.title = ""
+            button.image = StatusIconArt.glassImage(for: status)
+            return
+        }
+        switch status {
         case .spinner(let frame):
             // Animated spinner while fetching or while any workflow is still running.
             button.image = nil

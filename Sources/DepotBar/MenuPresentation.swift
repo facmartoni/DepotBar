@@ -19,6 +19,9 @@ enum MenuPresentation {
             icon = "✓"
         }
         var parts = ["\(workflow.name) — \(workflow.shortRepo)"]
+        if let author = workflow.author, !author.isEmpty {
+            parts.append(author)
+        }
         if let pr = workflow.prNumber {
             parts.append("#\(pr)")
         }
@@ -105,6 +108,7 @@ enum MenuDump {
         do {
             let client = try DepotClient(count: 5)
             let workflows = try await client.fetchWorkflows()
+            print("theme: \(AppConfig.load().theme.rawValue) (config: \(AppConfig.fileURL.path))")
             print("menu-bar icon: \(MenuPresentation.statusIcon(workflows: workflows, isFetching: false, fetchStartedAt: nil, lastError: nil, spinnerIndex: 0))")
             print("---")
             print("Depot CI")

@@ -25,8 +25,8 @@ Click the menu bar icon, get the state of CI:
 ```
 Depot CI
 ------------------------------
-✓  Tests & Deploy — macch-core · 15m ago · 8m16s
-✓  React Doctor — macch-core · #317 · 15m ago · 31s
+✓  Tests & Deploy — macch-core · @octocat · 15m ago · 8m16s
+✓  React Doctor — macch-core · @octocat · #317 · 15m ago · 31s
 ⠋  Test Docker Build — macch-hub · #42 · 1m ago · 1m10s
 ✓  Run MFA Tests — macch-hub · 3m ago · 4m02s
 ✗  Nightly E2E — macch-hub · 2h ago · 22m45s
@@ -50,12 +50,13 @@ Click any workflow to open it on depot.dev. The menu bar icon itself tells the s
 
 ## Features
 
-- 📊 **Latest 5 workflows** with status, repo, PR number, age, and duration
+- 📊 **Latest 5 workflows** with status, repo, author, PR number, age, and duration
 - 🌀 **Live spinner** in the menu bar and on running rows
 - 🔗 **One click** to open any workflow (or the whole dashboard) in your browser
 - 🔄 **Auto-refresh** every 30 seconds, plus every time you open the menu
 - 🚀 **Launch at login**, with a menu toggle
 - 🔑 **Zero token setup** — reuses your Depot CLI login
+- 👤 **Commit author in each row** — resolved from GitHub via your `gh` login (`@login`, or the raw commit name when unlinked); rows simply omit it when `gh` is missing or offline
 - 🪶 **Native & tiny** — Swift + AppKit, no dependencies, no Electron
 
 ## Install
@@ -81,6 +82,12 @@ and the Depot CLI logged in:
 brew install depot/tap/depot && depot login
 ```
 
+Optional, for author names in each row:
+
+```sh
+brew install gh && gh auth login
+```
+
 ## How auth works
 
 DepotBar shells out to `depot ci workflow list -n 5 -o json` and reuses the
@@ -96,6 +103,21 @@ links is read from the CLI's own settings (`DEPOT_ORG_ID` overrides it).
 | Debug the menu without UI | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --dump-menu` |
 | Verify menu-open timers | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --self-test` |
 | Refresh interval / row count | constants in [`main.swift`](Sources/DepotBar/main.swift) / [`DepotClient.swift`](Sources/DepotBar/DepotClient.swift) — edit & rebuild |
+| Theme | `theme` in `~/.config/depotbar/config.json`, or `DEPOTBAR_THEME` env var (wins) |
+
+## Themes
+
+`system` (default) follows macOS. `black` forces a fully dark menu —
+black chrome, white text — no matter the system appearance. `glass` is
+`black` plus a frosted-capsule menu-bar icon:
+
+```jsonc
+// ~/.config/depotbar/config.json
+{ "theme": "black" }   // "system" | "black" | "glass"
+```
+
+No config file needed: DepotBar works out of the box and ignores unknown
+theme names. A change applies the next time you open the menu (no relaunch).
 
 ## Project layout
 
@@ -103,6 +125,8 @@ links is read from the CLI's own settings (`DEPOT_ORG_ID` overrides it).
 DepotBar/
 ├── Sources/DepotBar/
 │   ├── main.swift            # menu bar app: status item, menu, timers
+│   ├── Config.swift          # ~/.config/depotbar/config.json + themes
+│   ├── StatusIconArt.swift   # frosted-capsule icon (glass theme)
 │   ├── DepotClient.swift     # Depot CLI wrapper + workflow models
 │   └── MenuPresentation.swift# menu strings + --dump-menu debug mode
 ├── Resources/
