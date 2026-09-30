@@ -1,5 +1,6 @@
 import AppKit
 import ServiceManagement
+import UserNotifications
 import os
 
 // MARK: - App entry point
@@ -20,7 +21,7 @@ app.run()
 // MARK: - Menu bar app
 
 @MainActor
-final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private static let logger = Logger(subsystem: "com.facmartoni.DepotBar", category: "app")
     private static let refreshInterval: TimeInterval = 30
 
@@ -34,6 +35,8 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fetchStartedAt: Date?
     private var spinnerIndex = 0
     private var theme: Theme = .system
+    private var notifyOnFailure = true
+    private var lastStatuses: [String: String]?
     private var rowItems: [String: NSMenuItem] = [:]
     private var statusFooterItem: NSMenuItem?
     private var logHandle: FileHandle?
@@ -50,9 +53,12 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
-        theme = AppConfig.load().theme
+        let config = AppConfig.load()
+        theme = config.theme
+        notifyOnFailure = config.notifyOnFailure
         menu.appearance = theme.menuAppearance
-        log("theme: \(theme.rawValue)")
+        log("theme: \(theme.rawValue) notifyOnFailure: \(notifyOnFailure)")
+        setupFailureNotifications()
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Depot CI")
@@ -99,9 +105,10 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Re-read the config so a theme change applies the next time the menu
     /// opens — no relaunch needed.
     private func reloadTheme() {
-        let fresh = AppConfig.load().theme
-        guard fresh != theme else { return }
-        theme = fresh
+        let config = AppConfig.load()
+        notifyOnFailure = config.notifyOnFailure
+        guard config.theme != theme else { return }
+        theme = config.theme
         menu.appearance = theme.menuAppearance
         log("theme: \(theme.rawValue)")
         updateStatusIcon()
@@ -138,6 +145,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.lastError = nil
                 let running = workflows.filter { $0.isRunning }.count
                 self.log("fetched \(workflows.count) workflows (\(running) running)")
+                self.notifyNewFailures(workflows)
             } catch is CancellationError {
                 return
             } catch let DepotError.failed(_, message) {
@@ -389,6 +397,80 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.runModal()
+    }
+
+    // MARK: - Failure notifications
+
+    private func setupFailureNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                self.log("notifications: request failed: \(error.localizedDescription)")
+            } else {
+                self.log("notifications: \(granted ? "granted" : "denied")")
+            }
+        }
+    }
+
+    /// Notify once per workflow failure transition. The first successful
+    /// fetch only seeds the baseline (no boot spam); unchanged failures
+    /// never re-notify.
+    private func notifyNewFailures(_ workflows: [DepotWorkflow]) {
+        let current = FailureNotify.statusMap(workflows)
+        defer { lastStatuses = current }
+        guard notifyOnFailure, let previous = lastStatuses else { return }
+        for workflow in FailureNotify.newlyFailed(current: workflows, previous: previous) {
+            notifyFailure(workflow)
+        }
+    }
+
+    private func notifyFailure(_ workflow: DepotWorkflow) {
+        var subtitle = "\(workflow.name) — \(workflow.shortRepo)"
+        if let pr = workflow.prNumber {
+            subtitle += " · #\(pr)"
+        }
+        if let author = workflow.author, !author.isEmpty {
+            subtitle += " · \(author)"
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Workflow failed"
+        content.subtitle = subtitle
+        content.sound = .default
+        content.userInfo = ["workflow_id": workflow.workflow_id]
+        let request = UNNotificationRequest(
+            identifier: "failure-\(workflow.workflow_id)",
+            content: content, trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                self.log("notifications: delivery failed: \(error.localizedDescription)")
+            } else {
+                self.log("notifications: failure notified for \(workflow.name) (\(workflow.workflow_id))")
+            }
+        }
+    }
+
+    // Show the banner even though the menu-bar app is always "foreground".
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    // Clicking the notification opens the workflow on depot.dev.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard let id = response.notification.request.content.userInfo["workflow_id"] as? String else { return }
+        await MainActor.run {
+            guard let workflow = self.workflows.first(where: { $0.workflow_id == id }),
+                  let url = self.client?.workflowURL(for: workflow)
+            else { return }
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Logging

@@ -136,6 +136,16 @@ black chrome, white text — no matter the system appearance. `glass` is
 No config file needed: DepotBar works out of the box and ignores unknown
 theme names. A change applies the next time you open the menu (no relaunch).
 
+## Failure notifications
+
+When a workflow turns red, DepotBar posts a macOS notification
+(`Workflow failed — name — repo · #PR · @author`); clicking it opens the
+workflow on depot.dev. Only transitions notify: already-red builds stay
+silent, and the first fetch after launch just sets the baseline (no boot
+spam). Cancelled runs don't notify. First launch asks for notification
+permission once. Disable anytime with `{ "notifyOnFailure": false }` in the
+config file.
+
 ## Project layout
 
 ```
