@@ -1,5 +1,6 @@
 import AppKit
 import ServiceManagement
+import UserNotifications
 import os
 
 // MARK: - App entry point
@@ -20,7 +21,7 @@ app.run()
 // MARK: - Menu bar app
 
 @MainActor
-final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private static let logger = Logger(subsystem: "com.facmartoni.DepotBar", category: "app")
     private static let refreshInterval: TimeInterval = 30
 
@@ -34,9 +35,12 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fetchStartedAt: Date?
     private var spinnerIndex = 0
     private var theme: Theme = .system
+    private var notifyOnFailure = true
+    private var lastStatuses: [String: String]?
     private var rowItems: [String: NSMenuItem] = [:]
     private var statusFooterItem: NSMenuItem?
     private var logHandle: FileHandle?
+    private var hasStoredToken = false
 
     // MARK: - Lifecycle
 
@@ -49,17 +53,21 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
-        theme = AppConfig.load().theme
+        let config = AppConfig.load()
+        theme = config.theme
+        notifyOnFailure = config.notifyOnFailure
         menu.appearance = theme.menuAppearance
-        log("theme: \(theme.rawValue)")
+        log("theme: \(theme.rawValue) notifyOnFailure: \(notifyOnFailure)")
+        setupFailureNotifications()
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Depot CI")
         }
 
+        hasStoredToken = (try? KeychainTokenStorage().load()) != nil
         do {
             client = try DepotClient(count: 5)
-            log("Depot CLI: \(client!.cliPath) org=\(client!.orgID ?? "unknown")")
+            log("Depot CLI: \(client!.cliPath) org=\(client!.orgID ?? "unknown") auth=\(client!.authSource)")
         } catch {
             lastError = "Depot CLI not found. Install it: brew install depot/tap/depot"
             log("ERROR: depot CLI not found")
@@ -97,9 +105,10 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Re-read the config so a theme change applies the next time the menu
     /// opens — no relaunch needed.
     private func reloadTheme() {
-        let fresh = AppConfig.load().theme
-        guard fresh != theme else { return }
-        theme = fresh
+        let config = AppConfig.load()
+        notifyOnFailure = config.notifyOnFailure
+        guard config.theme != theme else { return }
+        theme = config.theme
         menu.appearance = theme.menuAppearance
         log("theme: \(theme.rawValue)")
         updateStatusIcon()
@@ -110,6 +119,20 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var fetchTask: Task<Void, Never>?
 
     func refresh() {
+        // (Re)create the client lazily so installing the CLI — or saving a
+        // token — while the app is already running recovers on next refresh.
+        if client == nil {
+            do {
+                client = try DepotClient(count: 5)
+                lastError = nil
+                log("Depot CLI ready: \(client!.cliPath) org=\(client!.orgID ?? "unknown") auth=\(client!.authSource)")
+            } catch {
+                lastError = "Depot CLI not found. Install it: brew install depot/tap/depot"
+                log("ERROR: depot CLI not found")
+                rebuildMenu()
+                return
+            }
+        }
         guard let client, !isFetching else { return }
         isFetching = true
         fetchStartedAt = Date()
@@ -122,6 +145,7 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.lastError = nil
                 let running = workflows.filter { $0.isRunning }.count
                 self.log("fetched \(workflows.count) workflows (\(running) running)")
+                self.notifyNewFailures(workflows)
             } catch is CancellationError {
                 return
             } catch let DepotError.failed(_, message) {
@@ -184,6 +208,16 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dashboardItem = NSMenuItem(title: "Open Depot dashboard", action: #selector(openDashboard(_:)), keyEquivalent: "d")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
+
+        let tokenItem = NSMenuItem(title: "Set API Token…", action: #selector(promptForToken(_:)), keyEquivalent: "")
+        tokenItem.target = self
+        menu.addItem(tokenItem)
+
+        if hasStoredToken {
+            let removeTokenItem = NSMenuItem(title: "Remove API Token", action: #selector(removeToken(_:)), keyEquivalent: "")
+            removeTokenItem.target = self
+            menu.addItem(removeTokenItem)
+        }
 
         let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
         loginItem.target = self
@@ -298,6 +332,144 @@ final class DepotBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             log("launch at login: toggle failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - API token
+
+    @objc private func promptForToken(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Set Depot API Token"
+        alert.informativeText = "Create one in your Depot Organization Settings → API Tokens. "
+            + "It is stored in your Keychain and takes precedence over `depot login`."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let token = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        do {
+            try KeychainTokenStorage().save(token)
+        } catch {
+            log("ERROR: couldn't save API token: \(error.localizedDescription)")
+            showError("Couldn't save the API token: \(error.localizedDescription)")
+            return
+        }
+        hasStoredToken = true
+        do {
+            client = try DepotClient(count: 5)
+            lastError = nil
+            log("API token saved to Keychain (auth=\(client!.authSource))")
+        } catch {
+            lastError = "Depot CLI not found. Install it: brew install depot/tap/depot"
+            log("API token saved, but \(lastError!)")
+        }
+        rebuildMenu()
+        refresh()
+    }
+
+    @objc private func removeToken(_ sender: NSMenuItem) {
+        do {
+            try KeychainTokenStorage().delete()
+        } catch {
+            log("ERROR: couldn't remove API token: \(error.localizedDescription)")
+            showError("Couldn't remove the API token: \(error.localizedDescription)")
+            return
+        }
+        hasStoredToken = false
+        do {
+            client = try DepotClient(count: 5)
+            lastError = nil
+            log("API token removed (auth=\(client!.authSource))")
+        } catch {
+            lastError = "Depot CLI not found. Install it: brew install depot/tap/depot"
+            log("API token removed, but \(lastError!)")
+        }
+        rebuildMenu()
+        refresh()
+    }
+
+    private func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "DepotBar"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    // MARK: - Failure notifications
+
+    private func setupFailureNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                self.log("notifications: request failed: \(error.localizedDescription)")
+            } else {
+                self.log("notifications: \(granted ? "granted" : "denied")")
+            }
+        }
+    }
+
+    /// Notify once per workflow failure transition. The first successful
+    /// fetch only seeds the baseline (no boot spam); unchanged failures
+    /// never re-notify.
+    private func notifyNewFailures(_ workflows: [DepotWorkflow]) {
+        let current = FailureNotify.statusMap(workflows)
+        defer { lastStatuses = current }
+        guard notifyOnFailure, let previous = lastStatuses else { return }
+        for workflow in FailureNotify.newlyFailed(current: workflows, previous: previous) {
+            notifyFailure(workflow)
+        }
+    }
+
+    private func notifyFailure(_ workflow: DepotWorkflow) {
+        var subtitle = "\(workflow.name) — \(workflow.shortRepo)"
+        if let pr = workflow.prNumber {
+            subtitle += " · #\(pr)"
+        }
+        if let author = workflow.author, !author.isEmpty {
+            subtitle += " · \(author)"
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Workflow failed"
+        content.subtitle = subtitle
+        content.sound = .default
+        content.userInfo = ["workflow_id": workflow.workflow_id]
+        let request = UNNotificationRequest(
+            identifier: "failure-\(workflow.workflow_id)",
+            content: content, trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                self.log("notifications: delivery failed: \(error.localizedDescription)")
+            } else {
+                self.log("notifications: failure notified for \(workflow.name) (\(workflow.workflow_id))")
+            }
+        }
+    }
+
+    // Show the banner even though the menu-bar app is always "foreground".
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    // Clicking the notification opens the workflow on depot.dev.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard let id = response.notification.request.content.userInfo["workflow_id"] as? String else { return }
+        await MainActor.run {
+            guard let workflow = self.workflows.first(where: { $0.workflow_id == id }),
+                  let url = self.client?.workflowURL(for: workflow)
+            else { return }
+            NSWorkspace.shared.open(url)
         }
     }
 

@@ -39,9 +39,11 @@ enum Theme: String, Sendable {
 
 struct AppConfig: Sendable {
     var theme: Theme = .system
+    var notifyOnFailure: Bool = true
 
     struct FileBody: Codable {
         var theme: String?
+        var notifyOnFailure: Bool?
     }
 
     static var fileURL: URL {
@@ -62,6 +64,9 @@ struct AppConfig: Sendable {
         guard let data = try? Data(contentsOf: url),
               let body = try? JSONDecoder().decode(FileBody.self, from: data)
         else { return AppConfig() }
-        return AppConfig(theme: Theme.parse(body.theme))
+        return AppConfig(
+            theme: Theme.parse(body.theme),
+            notifyOnFailure: body.notifyOnFailure ?? true
+        )
     }
 }
