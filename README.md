@@ -103,6 +103,21 @@ links is read from the CLI's own settings (`DEPOT_ORG_ID` overrides it).
 | Debug the menu without UI | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --dump-menu` |
 | Verify menu-open timers | `/Applications/DepotBar.app/Contents/MacOS/DepotBar --self-test` |
 | Refresh interval / row count | constants in [`main.swift`](Sources/DepotBar/main.swift) / [`DepotClient.swift`](Sources/DepotBar/DepotClient.swift) — edit & rebuild |
+| Theme | `theme` in `~/.config/depotbar/config.json`, or `DEPOTBAR_THEME` env var (wins) |
+
+## Themes
+
+`system` (default) follows macOS. `black` forces a fully dark menu —
+black chrome, white text — no matter the system appearance. `glass` is
+`black` plus a frosted-capsule menu-bar icon:
+
+```jsonc
+// ~/.config/depotbar/config.json
+{ "theme": "black" }   // "system" | "black" | "glass"
+```
+
+No config file needed: DepotBar works out of the box and ignores unknown
+theme names. A change applies the next time you open the menu (no relaunch).
 
 ## Project layout
 
@@ -110,6 +125,8 @@ links is read from the CLI's own settings (`DEPOT_ORG_ID` overrides it).
 DepotBar/
 ├── Sources/DepotBar/
 │   ├── main.swift            # menu bar app: status item, menu, timers
+│   ├── Config.swift          # ~/.config/depotbar/config.json + themes
+│   ├── StatusIconArt.swift   # frosted-capsule icon (glass theme)
 │   ├── DepotClient.swift     # Depot CLI wrapper + workflow models
 │   └── MenuPresentation.swift# menu strings + --dump-menu debug mode
 ├── Resources/
