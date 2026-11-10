@@ -15,6 +15,8 @@ enum MenuPresentation {
             icon = spinner(at: spinnerIndex)
         } else if workflow.isFailed {
             icon = "✗"
+        } else if workflow.isCancelled {
+            icon = "⊘"
         } else {
             icon = "✓"
         }
