@@ -8,7 +8,7 @@ import Foundation
 
 enum FailureNotify {
     static func isFailure(_ workflow: DepotWorkflow) -> Bool {
-        workflow.status == "failed" || workflow.job_counts.failed > 0
+        workflow.isFailed
     }
 
     static func statusMap(_ workflows: [DepotWorkflow]) -> [String: String] {

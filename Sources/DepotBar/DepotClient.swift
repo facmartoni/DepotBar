@@ -40,7 +40,10 @@ struct DepotWorkflow: Codable, Sendable, Identifiable {
             || job_counts.running > 0 || job_counts.queued > 0 || job_counts.waiting > 0
     }
 
-    var isFailed: Bool { status == "failed" || status == "cancelled" || job_counts.failed > 0 }
+    var isFailed: Bool { status == "failed" || job_counts.failed > 0 }
+    /// CI cancels a queued run when a newer push supersedes it; that is not a
+    /// failure, so it gets its own mark and never turns the icon red.
+    var isCancelled: Bool { status == "cancelled" && !isFailed }
     var isFinished: Bool { status == "finished" && job_counts.failed == 0 }
 
     var shortRepo: String {

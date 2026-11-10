@@ -40,13 +40,13 @@ Launch at Login              ✓
 Quit DepotBar                ⌘Q
 ```
 
-Click any workflow to open it on depot.dev. The menu bar icon itself tells the story at a glance:
+Click any workflow to open it on depot.dev. A `⊘` row is a run CI cancelled because a newer push replaced it; it isn't a failure. The menu bar icon itself tells the story at a glance:
 
 | Icon | Meaning |
 | ---- | ------- |
 | animated spinner | a workflow is still running (or a refresh is taking >2s) |
 | ✓ green check | everything finished clean |
-| ✗ red cross | something failed |
+| ✗ red cross | something failed (cancelled runs don't count) |
 | ⚠ triangle | couldn't reach Depot (see logs) |
 
 ## Features
